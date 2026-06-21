@@ -16,13 +16,17 @@ jobs:
 
       - name: Parse and Push savedsearches.conf to Splunk
         run: |
-          IFS=$'\n'
+          # savedsearches.conf faylını bütöv blok mntiqi ilə oxuyan peşəkar skript
+          
           CURRENT_SECTION=""
           SEARCH_QUERY=""
           CRON=""
           ENABLED=""
           
-          while read -r line || [ -n "$line" ]; do
+          while IFS= read -r line || [ -n "$line" ]; do
+            # Sətir sonundakı boşluqları və carriage return (\r) simvollarını təmizləyirik
+            line=$(echo "$line" | tr -d '\r' | xargs -0)
+            
             if [[ "$line" =~ ^\[(.*)\]$ ]]; then
               if [ -n "$CURRENT_SECTION" ]; then
                 echo "Deploying: $CURRENT_SECTION"
@@ -41,15 +45,16 @@ jobs:
               SEARCH_QUERY=""
               CRON=""
               ENABLED=""
-            elif [[ "$line" =~ ^search\ =\ (.*)$ ]]; then
+            elif [[ "$line" =~ ^search[[:space:]]*=[[[:space:]]*(.*)$ ]]; then
               SEARCH_QUERY="${BASH_REMATCH[1]}"
-            elif [[ "$line" =~ ^cron_schedule\ =\ (.*)$ ]]; then
+            elif [[ "$line" =~ ^cron_schedule[[:space:]]*=[[[:space:]]*(.*)$ ]]; then
               CRON="${BASH_REMATCH[1]}"
-            elif [[ "$line" =~ ^enableSched\ =\ (.*)$ ]]; then
+            elif [[ "$line" =~ ^enableSched[[:space:]]*=[[[:space:]]*(.*)$ ]]; then
               ENABLED="${BASH_REMATCH[1]}"
             fi
           done < splunk/savedsearches.conf
 
+          # Sonuncu bloku da sistemə oturtmaq üçün
           if [ -n "$CURRENT_SECTION" ]; then
             echo "Deploying: $CURRENT_SECTION"
             curl -k -X POST "https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches" \

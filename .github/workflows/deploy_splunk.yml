@@ -1,0 +1,27 @@
+name: Deploy Rules to Splunk
+
+on:
+  push:
+    paths:
+      - 'splunk/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Push Rules via Splunk REST API
+        run: |
+          # Bu sadəcə konseptual bash scriptdir, alerts.conf-u oxuyub API-ya göndərir
+          curl -k -u "${{ secrets.SPLUNK_USER }}:${{ secrets.SPLUNK_PASSWORD }}" \
+            https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches \
+            -d name="GitHub_Managed_Alert" \
+            --data-urlencode search="index=windows EventCode=4625 | stats count by user" \
+            -d actions="email,webhook" \
+            -d alert_type="number of events" \
+            -d alert_comparator="greater than" \
+            -d alert_threshold="5" \
+            -d is_scheduled="1" \
+            -d cron_schedule="*/5 * * * *"

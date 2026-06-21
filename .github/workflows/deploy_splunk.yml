@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'splunk/**'
+      - '.github/workflows/**'  # Bu qovluq dəyişəndə də avtomatik işə düşsün
+  workflow_dispatch:            # SƏNƏ LAZIM OLAN DÜYMƏNİ AKTİV EDİR (Run workflow)
 
 jobs:
   deploy:
@@ -12,16 +14,57 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Push Rules via Splunk REST API
+      - name: Parse and Push savedsearches.conf to Splunk
         run: |
-          # Token istifadə edərək Splunk REST API-a düzgün müraciət forması
-          curl -k -X POST "https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches" \
-            -H "Authorization: Bearer ${{ secrets.SPLUNK_PASSWORD }}" \
-            -d name="GitHub_Managed_Alert" \
-            --data-urlencode search="index=windows EventCode=4625 | stats count by user" \
-            -d actions="email,webhook" \
-            -d alert_type="number of events" \
-            -d alert_comparator="greater than" \
-            -d alert_threshold="5" \
-            -d is_scheduled="1" \
-            -d cron_schedule="*/5 * * * *"
+          # savedsearches.conf faylını sətir-sətir oxuyub Splunk API-a göndərir
+          # Bu skript Splunk Token (Bearer) ilə tam təhlükəsiz işləyir
+          
+          IFS=$'\n'
+          CURRENT_SECTION=""
+          SEARCH_QUERY=""
+          CRON=""
+          ENABLED=""
+          
+          while read -r line || [ -n "$line" ]; do
+            # Bölmə adını tapır [Rule_Name]
+            if [[ "$line" =~ ^\[(.*)\]$ ]]; then
+              if [ -n "$CURRENT_SECTION" ]; then
+                echo "Deploying: $CURRENT_SECTION"
+                curl -k -X POST "https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches" \
+                  -H "Authorization: Bearer ${{ secrets.SPLUNK_PASSWORD }}" \
+                  -d name="$CURRENT_SECTION" \
+                  --data-urlencode search="$SEARCH_QUERY" \
+                  -d is_scheduled="$ENABLED" \
+                  -d cron_schedule="$CRON" \
+                  -d actions="email,webhook" \
+                  -d alert_type="number of events" \
+                  -d alert_comparator="greater than" \
+                  -d alert_threshold="0"
+              fi
+              CURRENT_SECTION="${BASH_REMATCH[1]}"
+              SEARCH_QUERY=""
+              CRON=""
+              ENABLED=""
+            elif [[ "$line" =~ ^search\ =\ (.*)$ ]]; then
+              SEARCH_QUERY="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^cron_schedule\ =\ (.*)$ ]]; then
+              CRON="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^enableSched\ =\ (.*)$ ]]; then
+              ENABLED="${BASH_REMATCH[1]}"
+            fi
+          done < splunk/savedsearches.conf
+
+          # Sonuncu qaydanı da göndərmək üçün
+          if [ -n "$CURRENT_SECTION" ]; then
+            echo "Deploying: $CURRENT_SECTION"
+            curl -k -X POST "https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches" \
+              -H "Authorization: Bearer ${{ secrets.SPLUNK_PASSWORD }}" \
+              -d name="$CURRENT_SECTION" \
+              --data-urlencode search="$SEARCH_QUERY" \
+              -d is_scheduled="$ENABLED" \
+              -d cron_schedule="$CRON" \
+              -d actions="email,webhook" \
+              -d alert_type="number of events" \
+              -d alert_comparator="greater than" \
+              -d alert_threshold="0"
+          fi

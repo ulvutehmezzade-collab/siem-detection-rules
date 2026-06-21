@@ -1,0 +1,29 @@
+name: Deploy Rules to QRadar
+
+on:
+  push:
+    paths:
+      - 'qradar/**'
+
+jobs:
+  deploy_qradar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Push Rules via QRadar REST API
+        run: |
+          # qradar/rules.json faylını oxuyur və hər bir qaydanı dövr (loop) vasitəsilə QRadar API-a göndərir
+          cat qradar/rules.json | jq -c '.[]' | while read -r rule; do
+            # Qaydanın adını loq mqsədi ilə çıxarırıq
+            RULE_NAME=$(echo "$rule" | jq -r '.name')
+            echo "Deploying rule: $RULE_NAME"
+            
+            # QRadar REST API-a POST sorğusu göndərilir
+            curl -k -X POST "https://${{ secrets.QRADAR_HOST }}/api/analytics/rules" \
+              -H "SEC: ${{ secrets.QRADAR_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              -d "$rule"
+          done

@@ -4,8 +4,8 @@ on:
   push:
     paths:
       - 'splunk/**'
-      - '.github/workflows/**'  # Bu qovluq dəyişəndə də avtomatik işə düşsün
-  workflow_dispatch:            # SƏNƏ LAZIM OLAN DÜYMƏNİ AKTİV EDİR (Run workflow)
+      - '.github/workflows/**'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -16,9 +16,6 @@ jobs:
 
       - name: Parse and Push savedsearches.conf to Splunk
         run: |
-          # savedsearches.conf faylını sətir-sətir oxuyub Splunk API-a göndərir
-          # Bu skript Splunk Token (Bearer) ilə tam təhlükəsiz işləyir
-          
           IFS=$'\n'
           CURRENT_SECTION=""
           SEARCH_QUERY=""
@@ -26,7 +23,6 @@ jobs:
           ENABLED=""
           
           while read -r line || [ -n "$line" ]; do
-            # Bölmə adını tapır [Rule_Name]
             if [[ "$line" =~ ^\[(.*)\]$ ]]; then
               if [ -n "$CURRENT_SECTION" ]; then
                 echo "Deploying: $CURRENT_SECTION"
@@ -36,7 +32,7 @@ jobs:
                   --data-urlencode search="$SEARCH_QUERY" \
                   -d is_scheduled="$ENABLED" \
                   -d cron_schedule="$CRON" \
-                  -d actions="email,webhook" \
+                  -d actions="webhook" \
                   -d alert_type="number of events" \
                   -d alert_comparator="greater than" \
                   -d alert_threshold="0"
@@ -54,7 +50,6 @@ jobs:
             fi
           done < splunk/savedsearches.conf
 
-          # Sonuncu qaydanı da göndərmək üçün
           if [ -n "$CURRENT_SECTION" ]; then
             echo "Deploying: $CURRENT_SECTION"
             curl -k -X POST "https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches" \
@@ -63,7 +58,7 @@ jobs:
               --data-urlencode search="$SEARCH_QUERY" \
               -d is_scheduled="$ENABLED" \
               -d cron_schedule="$CRON" \
-              -d actions="email,webhook" \
+              -d actions="webhook" \
               -d alert_type="number of events" \
               -d alert_comparator="greater than" \
               -d alert_threshold="0"

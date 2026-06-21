@@ -15,27 +15,25 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Parse and Push savedsearches.conf to Splunk
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # savedsearches.conf faylını blok məntiqi ilə oxuyub Splunk API-a göndərən skript
-          
           CURRENT_SECTION=""
           SEARCH_QUERY=""
           CRON=""
           ENABLED=""
+          ACTIONS=""
+          WEBHOOK_URI=""
           
           while IFS= read -r line || [ -n "$line" ]; do
-            # Sətir sonundakı boşluqları və carriage return (\r) simvollarını təmizləyirik
             line=$(echo "$line" | tr -d '\r' | xargs -0)
             
             if [[ "$line" =~ ^\[(.*)\]$ ]]; then
               if [ -n "$CURRENT_SECTION" ]; then
                 echo "Deploying: $CURRENT_SECTION"
                 
-                # Dinamik olaraq Telegram məlumatlarını ehtiva edən webhook URI-ını hazırlayırıq
-                WEBHOOK_URL="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=🚨+ALERT:+${CURRENT_SECTION}+Triggered!"
+                # Əgər konfiqurasiyada xüsusi webhook yoxdursa, digər 15 qayda üçün default link yaradırıq (sirensiz)
+                if [ -z "$WEBHOOK_URI" ]; then
+                  WEBHOOK_URI="https://api.telegram.org/bot8976522214:AAFHTcRSp4z43y8WkP2XLPJF_HuNr8LjfEg/sendMessage?chat_id=-1004382963620&text=ALERT:+${CURRENT_SECTION}+Triggered!"
+                fi
                 
                 curl -k -X POST "https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches" \
                   -H "Authorization: Bearer ${{ secrets.SPLUNK_PASSWORD }}" \
@@ -43,29 +41,36 @@ jobs:
                   --data-urlencode search="$SEARCH_QUERY" \
                   -d is_scheduled="$ENABLED" \
                   -d cron_schedule="$CRON" \
-                  -d actions="webhook" \
-                  -d action.webhook.uri="$WEBHOOK_URL" \
+                  -d actions="$ACTIONS" \
+                  --data-urlencode action.webhook.uri="$WEBHOOK_URI" \
                   -d alert_type="number of events" \
                   -d alert_comparator="greater than" \
-                  -d alert_threshold="0"
+                  -d alert_threshold="0" \
+                  -d force_overwrite=true
               fi
               CURRENT_SECTION="${BASH_REMATCH[1]}"
               SEARCH_QUERY=""
               CRON=""
               ENABLED=""
+              ACTIONS="webhook"
+              WEBHOOK_URI=""
             elif [[ "$line" =~ ^search[[:space:]]*=[[[:space:]]*(.*)$ ]]; then
               SEARCH_QUERY="${BASH_REMATCH[1]}"
             elif [[ "$line" =~ ^cron_schedule[[:space:]]*=[[[:space:]]*(.*)$ ]]; then
               CRON="${BASH_REMATCH[1]}"
             elif [[ "$line" =~ ^enableSched[[:space:]]*=[[[:space:]]*(.*)$ ]]; then
               ENABLED="${BASH_REMATCH[1]}"
+            elif [[ "$line" =~ ^action\.webhook\.uri[[:space:]]*=[[[:space:]]*(.*)$ ]]; then
+              WEBHOOK_URI="${BASH_REMATCH[1]}"
             fi
           done < splunk/savedsearches.conf
 
-          # Sonuncu bloku da sistemə oturtmaq üçün
+          # Sonuncu blok üçün təkrar icra
           if [ -n "$CURRENT_SECTION" ]; then
             echo "Deploying: $CURRENT_SECTION"
-            WEBHOOK_URL="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=🚨+ALERT:+${CURRENT_SECTION}+Triggered!"
+            if [ -z "$WEBHOOK_URI" ]; then
+              WEBHOOK_URI="https://api.telegram.org/bot8976522214:AAFHTcRSp4z43y8WkP2XLPJF_HuNr8LjfEg/sendMessage?chat_id=-1004382963620&text=ALERT:+${CURRENT_SECTION}+Triggered!"
+            fi
             
             curl -k -X POST "https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches" \
               -H "Authorization: Bearer ${{ secrets.SPLUNK_PASSWORD }}" \
@@ -73,9 +78,10 @@ jobs:
               --data-urlencode search="$SEARCH_QUERY" \
               -d is_scheduled="$ENABLED" \
               -d cron_schedule="$CRON" \
-              -d actions="webhook" \
-              -d action.webhook.uri="$WEBHOOK_URL" \
-                  -d alert_type="number of events" \
-                  -d alert_comparator="greater than" \
-                  -d alert_threshold="0"
+              -d actions="$ACTIONS" \
+              --data-urlencode action.webhook.uri="$WEBHOOK_URI" \
+              -d alert_type="number of events" \
+              -d alert_comparator="greater than" \
+              -d alert_threshold="0" \
+              -d force_overwrite=true
           fi

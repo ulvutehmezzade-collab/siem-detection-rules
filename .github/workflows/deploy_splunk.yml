@@ -14,9 +14,9 @@ jobs:
 
       - name: Push Rules via Splunk REST API
         run: |
-          # Bu sadəcə konseptual bash scriptdir, alerts.conf-u oxuyub API-ya göndərir
-          curl -k -u "${{ secrets.SPLUNK_USER }}:${{ secrets.SPLUNK_PASSWORD }}" \
-            https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches \
+          # Token istifadə edərək Splunk REST API-a düzgün müraciət forması
+          curl -k -X POST "https://${{ secrets.SPLUNK_HOST }}:8089/servicesNS/nobody/search/saved/searches" \
+            -H "Authorization: Bearer ${{ secrets.SPLUNK_PASSWORD }}" \
             -d name="GitHub_Managed_Alert" \
             --data-urlencode search="index=windows EventCode=4625 | stats count by user" \
             -d actions="email,webhook" \

@@ -1,22 +1,22 @@
 name: Deploy Rules to QRadar
-
+​
 on:
   push:
     paths:
       - 'qradar/**'
   workflow_dispatch:
-
+​
 jobs:
   deploy_qradar:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-
+​
       - name: Push Rules via QRadar REST API
         env:
-          QRADAR_HOST: $ secrets.QRADAR_HOST 
-          QRADAR_TOKEN: $ secrets.QRADAR_TOKEN 
+          QRADAR_HOST: ${{ secrets.QRADAR_HOST }}
+          QRADAR_TOKEN: ${{ secrets.QRADAR_TOKEN }}
         run: |
           cat qradar/rules.json | jq -c '.[]' | while read -r rule; do
             RULE_NAME=$(echo "$rule" | jq -r '.name')

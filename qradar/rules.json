@@ -1,62 +1,112 @@
 [
   {
-    "name": "QR_Rule_01: Process Hollowing via Anomalous Parent",
-    "description": "Detects core Windows processes launched by unexpected parents, indicating process injection.",
+    "name": "QR_Rule_01: Password Brute-Force & Account Lockout",
+    "description": "Eyni menbeden 5 deqiqe icinde 5+ ugursuz giris (4625) ve ya hesabin kilidlenmesi (4740). Parol siyasetinin lockout haddine (5) qarsi brute-force cehdini askarlayir.",
     "severity": 8,
-    "expression": "SELECT \"Image\", \"ParentImage\", \"Computer\" FROM events WHERE qid = 5000845 AND \"Image\" LIKE '%\\svchost.exe' AND \"ParentImage\" NOT LIKE '%\\services.exe' START '-5 MINUTES'"
+    "gpo_policy": "Parol/lockout siyaseti - 5 xetali giris limiti, 15 deqiqe kilid",
+    "mitre_attack": ["attack.credential_access", "attack.t1110", "attack.t1110.001"],
+    "event_ids": ["4625", "4740"],
+    "expression": "SELECT sourceip, username, \"Event ID\", COUNT(*) AS attempts FROM events WHERE \"Event ID\"='4625' GROUP BY sourceip, username HAVING attempts>=5 LAST 5 MINUTES",
+    "cre_logic": "Test 1: 'Event ID' equals 4625 -> count >= 5 grouped by Source IP in 5 min. Test 2 (OR): 'Event ID' equals 4740. Response: Dispatch New Event, Ensure part of an offense indexed by Username/Source IP.",
+    "offense": true
   },
   {
-    "name": "QR_Rule_02: Active Directory DCSync Attack Detection",
-    "description": "Identifies replication requests against the Domain Controller from an unauthorized host.",
-    "severity": 10,
-    "expression": "SELECT \"SubjectUserName\", \"Source_IP\", \"ObjectName\" FROM events WHERE qid = 5000922 AND \"Event ID\" = 4662 AND \"AccessMask\" = '0x100' AND \"Properties\" LIKE '%1131f6aa-9c07-11d1-f79f-00c04fc2dcd2%' START '-5 MINUTES'"
-  },
-  {
-    "name": "QR_Rule_03: Remote Desktop Protocol (RDP) Tunneling over SSH",
-    "description": "Detects inbound SSH traffic containing encapsulated local loops indicating internal proxy/tunnel.",
-    "severity": 7,
-    "expression": "SELECT \"Source Port\", \"Destination Port\", \"Source_IP\" FROM events WHERE \"Destination Port\" = 22 AND \"Payload\" LIKE '%localhost%' OR \"Payload\" LIKE '%127.0.0.1%' START '-10 MINUTES'"
-  },
-  {
-    "name": "QR_Rule_04: Massive Domain Account Lockout Event",
-    "description": "Triggers when an abnormally high number of distinct user lockouts happen concurrently across AD.",
-    "severity": 8,
-    "expression": "SELECT COUNT(\"TargetUserName\") as total_lockouts, \"Computer\" FROM events WHERE \"Event ID\" = 4740 GROUP BY \"Computer\" HAVING total_lockouts > 10 START '-15 MINUTES'"
-  },
-  {
-    "name": "QR_Rule_05: Suspicious WMI Remote Command Execution",
-    "description": "Detects native Windows Management Instrumentation (WMI) scripts launching payloads remotely.",
+    "name": "QR_Rule_02: New User Account Created",
+    "description": "Yeni user hesabinin yaradilmasi (4720) ve/veya aktiv edilmesi (4722). Icaze verilmemis hesab yaradilmasini (persistence) askarlayir.",
     "severity": 6,
-    "expression": "SELECT \"CommandLine\", \"Computer\", \"User\" FROM events WHERE qid = 5000845 AND \"Image\" LIKE '%\\wmic.exe' AND \"CommandLine\" LIKE '%/node:%' AND \"CommandLine\" LIKE '%process call create%' START '-5 MINUTES'"
+    "gpo_policy": "Loglama siyaseti - Istifadeci idareetmeleri (user management) loglari aktiv",
+    "mitre_attack": ["attack.persistence", "attack.t1136", "attack.t1136.001"],
+    "event_ids": ["4720", "4722"],
+    "expression": "SELECT username, \"TargetUserName\", \"Event ID\" FROM events WHERE \"Event ID\" IN ('4720','4722') LAST 5 MINUTES",
+    "cre_logic": "Test: 'Event ID' is any of 4720, 4722. Response: Dispatch New Event + Offense indexed by TargetUserName.",
+    "offense": true
   },
   {
-    "name": "QR_Rule_06: Threat Intel Command and Control Beaconing Detection",
-    "description": "Tracks persistent equal-interval network beacons to external bad reputation destination IPs.",
+    "name": "QR_Rule_03: User Added to Privileged/Administrators Group",
+    "description": "Istifadecinin imtiyazli qrupa (Administrators/Domain Admins) elave edilmesi (4732 lokal, 4728 qlobal, 4756 universal). Privilege escalation-i askarlayir.",
     "severity": 9,
-    "expression": "SELECT COUNT(*) as beacon_count, \"Source_IP\", \"Destination_IP\" FROM events WHERE \"Destination_IP\" IN (SELECT ip FROM reference_set WHERE name='C2_Bad_IPs') GROUP BY \"Source_IP\", \"Destination_IP\" HAVING beacon_count > 50 START '-30 MINUTES'"
+    "gpo_policy": "Loglama - user management; Admin/qrup idareetmesi nezareti",
+    "mitre_attack": ["attack.privilege_escalation", "attack.t1098", "attack.t1078"],
+    "event_ids": ["4728", "4732", "4756"],
+    "expression": "SELECT username, \"TargetUserName\", \"TargetSid\", \"Event ID\" FROM events WHERE \"Event ID\" IN ('4728','4732','4756') LAST 5 MINUTES",
+    "cre_logic": "Test: 'Event ID' is any of 4728, 4732, 4756. (Optional) Group Name ilike 'Admin'. Response: Dispatch New Event + Offense indexed by TargetUserName, Magnitude high.",
+    "offense": true
   },
   {
-    "name": "QR_Rule_07: Privilege Escalation via PrintNightmare Exploitation",
-    "description": "Detects Spooler service loading suspicious external drivers from unexpected UNC or local paths.",
+    "name": "QR_Rule_04: Use of Built-in Administrator (RID 500)",
+    "description": "Daxili Administrator hesabinin (RID 500 / ad 'Administrator') istifadesi. GPO admin adinin deyisilmesini teleb etdiyi ucun bu hesabin istifadesi anomaliya/pozuntudur.",
+    "severity": 7,
+    "gpo_policy": "Admin hesabinin adi mutleq deyisilmelidir (default 'Administrator' olmamalidir)",
+    "mitre_attack": ["attack.defense_evasion", "attack.t1078", "attack.t1078.001"],
+    "event_ids": ["4624", "4672"],
+    "expression": "SELECT username, \"TargetUserName\", \"TargetSid\", sourceip, \"Event ID\" FROM events WHERE \"Event ID\" IN ('4624','4672') AND (\"TargetSid\" LIKE '%-500' OR \"TargetUserName\"='Administrator') LAST 5 MINUTES",
+    "cre_logic": "Test: 'Event ID' is any of 4624,4672 AND (Target SID ends with -500 OR TargetUserName='Administrator'). Response: Dispatch New Event + Offense indexed by Username.",
+    "offense": true
+  },
+  {
+    "name": "QR_Rule_05: Unauthorized RDP Logon (non Remote Desktop Admins)",
+    "description": "Icaze verilmis siyahida (reference set) olmayan istifadecinin RDP (LogonType 10) ile girisi ve ya cehdinin askarlanmasi.",
+    "severity": 8,
+    "gpo_policy": "RDP yalniz Remote Desktop Admins qrupuna; diger userler RDP ile qosula bilmemelidir",
+    "mitre_attack": ["attack.lateral_movement", "attack.t1021", "attack.t1021.001"],
+    "event_ids": ["4624", "4625"],
+    "expression": "SELECT username, sourceip, \"LogonType\", \"Event ID\" FROM events WHERE \"Event ID\" IN ('4624','4625') AND \"LogonType\"='10' AND username NOT IN (SELECT value FROM reference_data WHERE name='Authorized_RDP_Users') LAST 5 MINUTES",
+    "cre_logic": "Onceden 'Authorized_RDP_Users' reference set yarat. Test: 'Event ID' is any of 4624,4625 AND Logon Type = 10 AND Username NOT in Reference Set 'Authorized_RDP_Users'. Response: Dispatch New Event + Offense indexed by Username.",
+    "offense": true
+  },
+  {
+    "name": "QR_Rule_06: Legacy NTLMv1 / LM Authentication",
+    "description": "Zeif LM/NTLMv1 authentication paketinin istifadesi (downgrade). GPO bunlari sondurur: her hansi LM/NTLMv1 istifadesi pozuntu/hucum elametidir.",
+    "severity": 7,
+    "gpo_policy": "LM ve NTLMv1 sondurulmeli; LM hash yadda saxlanilmamali",
+    "mitre_attack": ["attack.credential_access", "attack.t1550", "attack.t1212"],
+    "event_ids": ["4624"],
+    "expression": "SELECT username, sourceip, \"AuthenticationPackageName\", \"LmPackageName\", \"Event ID\" FROM events WHERE \"Event ID\"='4624' AND (\"LmPackageName\" ILIKE '%NTLM V1%' OR \"LmPackageName\" ILIKE '%LM%') LAST 10 MINUTES",
+    "cre_logic": "Test: 'Event ID' = 4624 AND (LmPackageName ilike 'LM' OR ilike 'NTLM V1'). Response: Dispatch New Event + Offense indexed by Source IP.",
+    "offense": true
+  },
+  {
+    "name": "QR_Rule_07: Security Audit Log Cleared / Audit Policy Tampering",
+    "description": "Audit log-un temizlenmesi (1102/104) ve ya audit siyasetinin deyisdirilmesi (4719). Klassik iz-itirme (anti-forensics) davranishi.",
     "severity": 10,
-    "expression": "SELECT \"ImageLoaded\", \"Computer\" FROM events WHERE qid = 5000847 AND \"Image\" LIKE '%\\spoolsv.exe' AND \"ImageLoaded\" LIKE '%\\System32\\tasks\\%' START '-5 MINUTES'"
+    "gpo_policy": "Security Policy deyisiklikleri loglari aktiv; loglama strukturunun qorunmasi",
+    "mitre_attack": ["attack.defense_evasion", "attack.t1070", "attack.t1070.001", "attack.t1562.002"],
+    "event_ids": ["1102", "104", "4719"],
+    "expression": "SELECT username, \"Event ID\", \"Computer\" FROM events WHERE \"Event ID\" IN ('1102','104','4719') LAST 5 MINUTES",
+    "cre_logic": "Test: 'Event ID' is any of 1102, 104, 4719. Response: Dispatch New Event + Offense indexed by Username, Magnitude very high.",
+    "offense": true
   },
   {
-    "name": "QR_Rule_08: Cloud Exfiltration via Unapproved Storage Services",
-    "description": "Identifies excessive upload traffic outbound toward Mega, Dropbox, or Mediafire domains from network logs.",
-    "severity": 7,
-    "expression": "SELECT SUM(\"Source Bytes\") as total_upload, \"Source_IP\", \"Domain\" FROM events WHERE \"Domain\" IN ('mega.nz', 'dropbox.com', 'mediafire.com') GROUP BY \"Source_IP\", \"Domain\" HAVING total_upload > 2147483648 START '-60 MINUTES'"
+    "name": "QR_Rule_08: Suspicious / Obfuscated PowerShell Execution",
+    "description": "Obfuscated/encoded PowerShell icrasi (Script Block 4104 ve ya Sysmon process create). -enc, -nop, bypass, hidden, DownloadString kimi elametler.",
+    "severity": 8,
+    "gpo_policy": "PowerShell logging aktiv (Server); klientlerde PowerShell bloklanir",
+    "mitre_attack": ["attack.execution", "attack.t1059", "attack.t1059.001", "attack.t1027"],
+    "event_ids": ["4104", "4103"],
+    "expression": "SELECT username, \"Image\", \"CommandLine\", \"Event ID\" FROM events WHERE (\"Event ID\"='4104' OR qid=5000845) AND (\"CommandLine\" ILIKE '%-enc%' OR \"CommandLine\" ILIKE '%encodedcommand%' OR \"CommandLine\" ILIKE '%frombase64string%' OR \"CommandLine\" ILIKE '%downloadstring%' OR \"CommandLine\" ILIKE '%-nop%' OR \"CommandLine\" ILIKE '%bypass%' OR \"CommandLine\" ILIKE '%hidden%') LAST 5 MINUTES",
+    "cre_logic": "Test: ('Event ID'=4104 OR QID=Sysmon Process Create) AND CommandLine/ScriptBlock matches suspicious keywords. Response: Dispatch New Event + Offense indexed by Username/Computer.",
+    "offense": true
   },
   {
-    "name": "QR_Rule_09: Microsoft 365 Anomalous Admin Role Escalation",
-    "description": "Triggers when an administrative privilege is delegated or added to an Azure/M365 account unexpectedly.",
+    "name": "QR_Rule_09: Removable USB Storage Device Connected",
+    "description": "Xarici/removable disk qurgu tanindi (6416 Kernel-PnP, ve ya DriverFrameworks 2003/2102). GPO USB-ni bloklayir: her taxilma pozuntudur.",
+    "severity": 6,
+    "gpo_policy": "Xarici diskler (USB flash, HDD, SSD) sisteme taxilmasi qadagan",
+    "mitre_attack": ["attack.initial_access", "attack.t1200", "attack.t1091"],
+    "event_ids": ["6416", "2003", "2102"],
+    "expression": "SELECT username, \"Computer\", \"ClassName\", \"Event ID\" FROM events WHERE \"Event ID\" IN ('6416','2003','2102') LAST 5 MINUTES",
+    "cre_logic": "Test: 'Event ID' is any of 6416, 2003, 2102 (ve ya Device Class = DiskDrive/USB). Response: Dispatch New Event + Offense indexed by Computer.",
+    "offense": true
+  },
+  {
+    "name": "QR_Rule_10: Office Macro / Windows Script Host Child Process (LOLBIN)",
+    "description": "Office tetbiqinin (Word/Excel/Outlook) shell/skript (cmd/powershell/wscript/cscript/mshta) yaratmasi (makro hucumu), ve ya WSH (wscript/cscript) icrasi. Sysmon EventID 1 ve ya Security 4688.",
     "severity": 9,
-    "expression": "SELECT \"Actor\", \"TargetUser\", \"Operation\" FROM events WHERE \"Log Source Type\" = 'Microsoft Office 365' AND \"Operation\" = 'Add member to role.' AND \"TargetUpdatedProperties\" LIKE '%Company Administrator%' START '-10 MINUTES'"
-  },
-  {
-    "name": "QR_Rule_10: Living Off The Land Proxy Execution via Rundll32",
-    "description": "Detects rundll32.exe launching malicious streams without inline arguments or spawning shells.",
-    "severity": 7,
-    "expression": "SELECT \"CommandLine\", \"Computer\" FROM events WHERE qid = 5000845 AND \"Image\" LIKE '%\\rundll32.exe' AND (\"CommandLine\" LIKE '%javascript:%' OR \"CommandLine\" LIKE '%url.dll,FileProtocolHandler%') START '-5 MINUTES'"
+    "gpo_policy": "Makro bloklanir + Protected View; Windows Script Host sondurulur; CMD bloklanir",
+    "mitre_attack": ["attack.execution", "attack.t1204", "attack.t1204.002", "attack.t1059.005", "attack.t1059.007"],
+    "event_ids": ["1", "4688"],
+    "expression": "SELECT \"Image\", \"ParentImage\", \"CommandLine\", \"Computer\" FROM events WHERE qid=5000845 AND ((\"ParentImage\" ILIKE '%winword.exe' OR \"ParentImage\" ILIKE '%excel.exe' OR \"ParentImage\" ILIKE '%powerpnt.exe' OR \"ParentImage\" ILIKE '%outlook.exe') AND (\"Image\" ILIKE '%cmd.exe' OR \"Image\" ILIKE '%powershell.exe' OR \"Image\" ILIKE '%wscript.exe' OR \"Image\" ILIKE '%cscript.exe' OR \"Image\" ILIKE '%mshta.exe') OR \"Image\" ILIKE '%wscript.exe' OR \"Image\" ILIKE '%cscript.exe') LAST 5 MINUTES",
+    "cre_logic": "Test: QID = Sysmon Process Create AND ((ParentImage is Office app AND Image is shell/script) OR Image is wscript/cscript). Response: Dispatch New Event + Offense indexed by Computer.",
+    "offense": true
   }
 ]
